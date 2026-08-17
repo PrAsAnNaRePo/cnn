@@ -175,6 +175,25 @@ void backward(Tensor *t){
         }
         break;
         }
+
+      case EMBEDDING: {
+        Tensor *input = curr->grad_fn->inputs[0];
+        Tensor *weights = curr->grad_fn->inputs[1];
+
+        uint32 B = input->shape[0];
+        uint32 T = input->shape[1];
+        uint32 D = weights->shape[1];
+        for (uint32 b = 0; b < B; b++){
+          for (uint32 seq_len = 0; seq_len < T; seq_len++){
+            uint32 tok_idx = input->data[b * T + seq_len];
+
+            for (uint32 d = 0; d < D; d++){
+              weights->grad[tok_idx * D + d] += curr->grad[b * T * D + seq_len * D + d];
+            }
+          }
+        }
+        break;
+        }
       }
     }
   }

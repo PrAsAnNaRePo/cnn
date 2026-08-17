@@ -26,7 +26,9 @@ enum OPS{
     SOFTMAX,
 
     MSE_LOSS,
-    SOFTMAX_CROSS_ENTROPY
+    SOFTMAX_CROSS_ENTROPY,
+
+    EMBEDDING
 };
 
 struct Node{
