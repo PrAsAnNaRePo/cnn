@@ -4,6 +4,7 @@
 #include "types.h"
 #include <math.h>
 #include <stddef.h>
+#include "utils.c"
 
 typedef struct LinearLayer {
   uint32 in_ch;
@@ -18,9 +19,19 @@ typedef struct EmbeddingLayer {
   Tensor* weights;
 } EmbeddingLayer;
 
+typedef struct LayerNormLayer {
+  uint32 d_model;
+  Tensor* gamma;
+  Tensor* beta;
+  WEI_TYPE epsilon;
+} LayerNormLayer;
+
 LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias, WEI_TYPE wei_init);
 EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size);
 Tensor *EmbeddingCall(Arena *arena, Tensor *input, EmbeddingLayer* layer);
+LayerNormLayer *LayerNorm(Arena *arena, uint32 d_model, WEI_TYPE epsilon);
+Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer);
+
 Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Tensor *input);
 //activation fns
 Tensor *ReLU(Arena *arena, Tensor *input);
@@ -90,6 +101,55 @@ Tensor *EmbeddingCall(Arena *arena, Tensor *input, EmbeddingLayer* layer){
   output->grad_fn->visited = 0;
   return output;
 };
+
+LayerNormLayer *LayerNorm(Arena *arena, uint32 d_model, WEI_TYPE epsilon){
+  LayerNormLayer *layer = (LayerNormLayer *)arena_alloc(arena, sizeof(LayerNormLayer));
+  layer->d_model = d_model;
+  layer->epsilon = epsilon;
+  uint32 gamma_shape[2] = {1, d_model};
+  uint32 beta_shape[2] = {1, d_model};
+  layer->gamma = create_tensor(arena, gamma_shape, 2, 1.0);
+  layer->beta = create_tensor(arena, beta_shape, 2, 0.0);
+  return layer;
+}
+
+
+Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer){
+  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0);
+
+  uint32 B = input->shape[0];
+  uint32 S = input->shape[1];
+  uint32 D = input->shape[2];
+
+  for (uint32 b = 0; b < B; b++){
+    uint32 s_batch = b * S * D;
+    for (uint32 s = 0; s < S; s++){
+      uint32 s_row = s * D;
+
+      WEI_TYPE *x_tok = &input->data[s_batch + s_row];
+      WEI_TYPE _u = mean(x_tok, D);
+      WEI_TYPE _v = var(x_tok, _u, D);
+      WEI_TYPE inv_std = 1.0f / sqrtf(_v + layer->epsilon);
+
+      for (uint32 d = 0; d < D; d++){
+        WEI_TYPE x_hat = (x_tok[d] - _u) * inv_std;
+        output->data[s_batch + s_row + d] = x_hat * layer->gamma->data[d] + layer->beta->data[d];
+      }
+    }
+  }
+
+  output->grad_fn = (Node *)arena_alloc(arena, sizeof(Node));
+  output->grad_fn->ops = LAYER_NORM;
+  output->grad_fn->num_inputs = 3;
+  output->grad_fn->inputs[0] = input;
+  output->grad_fn->inputs[1] = layer->gamma;
+  output->grad_fn->inputs[2] = layer->beta;
+  output->grad_fn->output = output;
+  output->grad_fn->visited = 0;
+  output->grad_fn->epsilon = layer->epsilon;
+  return output;
+}
+
 
 Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Tensor *input){
   for (uint32 layer = 0; layer < num_layers; layer++){

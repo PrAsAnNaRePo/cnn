@@ -28,7 +28,8 @@ enum OPS{
     MSE_LOSS,
     SOFTMAX_CROSS_ENTROPY,
 
-    EMBEDDING
+    EMBEDDING,
+    LAYER_NORM
 };
 
 struct Node{
@@ -37,6 +38,7 @@ struct Node{
     Tensor* inputs[3]; 
     Tensor* output;
     uint32 visited;
+    WEI_TYPE epsilon; // LAYER_NORM
 };
 
 Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim, WEI_TYPE wei_init);

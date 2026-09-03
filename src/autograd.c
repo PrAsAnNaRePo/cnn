@@ -3,6 +3,7 @@
 #include "config.h"
 #include "tensor.h"
 #include "types.h"
+#include <math.h>
 #include <stddef.h>
 
 void build_topo(Tensor *t, Tensor **topo_list, uint32 *topo_size){
@@ -125,7 +126,7 @@ void backward(Tensor *t){
                 WEI_TYPE si = curr->data[s_batch + s_row + n_col];
                 WEI_TYPE sj = curr->data[s_batch + s_row + col];
                 WEI_TYPE jacobian_val = (n_col == col) ? si * (1.0f - si) : -si * sj;
-                WEI_TYPE grad_out_i = curr->grad[s_batch + s_row + i];
+                WEI_TYPE grad_out_i = curr->grad[s_batch + s_row + n_col];
                 sum += grad_out_i * jacobian_val;
               }
               curr->grad_fn->inputs[0]->grad[s_batch + s_row + col] += sum;
@@ -189,6 +190,59 @@ void backward(Tensor *t){
 
             for (uint32 d = 0; d < D; d++){
               weights->grad[tok_idx * D + d] += curr->grad[b * T * D + seq_len * D + d];
+            }
+          }
+        }
+        break;
+        }
+
+      case LAYER_NORM: {
+        Tensor *input = curr->grad_fn->inputs[0];
+        Tensor *gamma = curr->grad_fn->inputs[1];
+        Tensor *beta  = curr->grad_fn->inputs[2];
+
+        uint32 B = input->shape[0];
+        uint32 S = input->shape[1];
+        uint32 D = input->shape[2];
+        WEI_TYPE eps = curr->grad_fn->epsilon;
+
+        for (uint32 b = 0; b < B; b++){
+          for (uint32 s = 0; s < S; s++){
+            uint32 s_row = (b * S + s) * D;
+
+            WEI_TYPE *x_tok = &input->data[s_row];
+            WEI_TYPE *g_tok = &curr->grad[s_row];
+
+            WEI_TYPE _u = 0.0f;
+            for (uint32 d = 0; d < D; d++) _u += x_tok[d];
+            _u /= (WEI_TYPE)D;
+
+            WEI_TYPE _v = 0.0f;
+            for (uint32 d = 0; d < D; d++) _v += (x_tok[d] - _u) * (x_tok[d] - _u);
+            _v /= (WEI_TYPE)D;
+
+            WEI_TYPE inv_std = 1.0f / sqrtf(_v + eps);
+
+            // S_1 = sum_i dL/dx_hat_i, S_2 = sum_i (dL/dx_hat_i)(x_hat_i);
+            WEI_TYPE s1 = 0.0f;
+            WEI_TYPE s2 = 0.0f;
+            for (uint32 d = 0; d < D; d++){
+              WEI_TYPE dx_hat = g_tok[d] * gamma->data[d];
+              WEI_TYPE x_hat = (x_tok[d] - _u) * inv_std;
+
+              s1 += dx_hat;
+              s2 += dx_hat * x_hat;
+
+              gamma->grad[d] += g_tok[d] * x_hat;
+              beta->grad[d]  += g_tok[d];
+            }
+
+            // dL/dx_d = inv_std * (dL/dx_hat_d - S_1/D - (x_hat_d/D) * S_2)
+            for (uint32 d = 0; d < D; d++){
+              WEI_TYPE dx_hat = g_tok[d] * gamma->data[d];
+              WEI_TYPE x_hat = (x_tok[d] - _u) * inv_std;
+              input->grad[s_row + d] += inv_std * (dx_hat - s1 / (WEI_TYPE)D
+                                                   - (x_hat / (WEI_TYPE)D) * s2);
             }
           }
         }
