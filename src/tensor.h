@@ -11,7 +11,6 @@ typedef struct Tensor {
     uint32 num_dim;
     WEI_TYPE *data, *grad;
 
-    uint32 *strides;
     uint32 numel;
     Node* grad_fn;
 } Tensor;

@@ -16,12 +16,6 @@ Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim,
 
   tensor->num_dim = num_dim;
 
-  tensor->strides = (uint32 *)arena_alloc(arena, sizeof(uint32) * num_dim);
-  tensor->strides[num_dim - 1] = 1;
-  for (int32 i = (int32)num_dim - 2; i >= 0; i--) {
-    tensor->strides[i] = tensor->shape[i + 1] * tensor->strides[i + 1];
-  }
-
   tensor->numel = tensor->shape[0];
   for (uint32 i = 1; i < num_dim; i++) {
     tensor->numel *= tensor->shape[i];
@@ -283,6 +277,7 @@ Tensor *reshape_tensor(Arena *arena, Tensor *tensor, uint32 *dshape,
     dst->shape[i] = dshape[i];
   }
   dst->num_dim = dnum_dim;
+  dst->grad_fn = tensor->grad_fn;
 
   return dst;
 }
