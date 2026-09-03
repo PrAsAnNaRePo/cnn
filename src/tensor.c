@@ -35,6 +35,7 @@ Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim,
   for (uint32 i = 0; i < tensor->numel; i++) {
     tensor->grad[i] = 0.0;
   }
+  tensor->grad_fn = NULL;
   return tensor;
 }
 
