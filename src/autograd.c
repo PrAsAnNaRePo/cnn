@@ -251,5 +251,22 @@ void backward(Tensor *t){
       }
     }
   }
+  for (int32 i = (int32)topo_size - 1; i >= 0; i--){
+    topo_list[i]->grad_fn->visited = 0;
+  }
 }
 
+
+void zero_grad(Tensor *t){
+  if (t==NULL) return;
+
+  if (t->grad_fn != NULL){
+    for (uint32 i = 0; i < t->grad_fn->num_inputs; i++){
+      zero_grad(t->grad_fn->inputs[i]);
+    }
+  }
+
+  for (uint32 i = 0; i < t->numel; i++){
+    t->grad[i] = 0.0f;
+  }
+}
