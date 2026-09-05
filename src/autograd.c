@@ -248,6 +248,24 @@ void backward(Tensor *t){
         }
         break;
         }
+
+      case SPLIT: {
+          size_t bz = 1;
+
+          for (uint32 i = 0; i < curr->grad_fn->inputs[0]->num_dim - 1; i++) {
+            bz *= curr->grad_fn->inputs[0]->shape[i];
+          }
+
+          uint32 width = curr->grad_fn->output->shape[curr->grad_fn->output->num_dim - 1];
+
+          for (size_t i = 0; i < bz; i++) {
+            for (uint32 j = 0; j < width; j++) {
+               curr->grad_fn->inputs[0]->grad[i * curr->grad_fn->inputs[0]->shape[curr->grad_fn->inputs[0]->num_dim - 1] + j + curr->grad_fn->offset] += curr->grad_fn->output->grad[i * width + j];
+            }
+          }
+
+        break;
+        }
       }
     }
   }

@@ -28,7 +28,9 @@ enum OPS{
     SOFTMAX_CROSS_ENTROPY,
 
     EMBEDDING,
-    LAYER_NORM
+    LAYER_NORM,
+
+    SPLIT
 };
 
 struct Node{
@@ -38,6 +40,7 @@ struct Node{
     Tensor* output;
     uint32 visited;
     WEI_TYPE epsilon; // LAYER_NORM
+    uint32 offset; // SPLIT fn
 };
 
 Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim, WEI_TYPE wei_init);
