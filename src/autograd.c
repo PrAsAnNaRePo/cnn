@@ -267,6 +267,13 @@ void backward(Tensor *t){
         break;
         }
       }
+      case SCALE: {
+        Tensor *input = curr->grad_fn->inputs[0];
+        for (uint32 i = 0; i < input->numel; i++){
+          input->grad[i] += curr->grad[i] * curr->grad_fn->scalar;
+        }
+        break;
+      } 
     }
   }
   for (int32 i = (int32)topo_size - 1; i >= 0; i--){

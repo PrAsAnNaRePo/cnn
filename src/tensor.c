@@ -229,10 +229,24 @@ WEI_TYPE sum_tensor(Tensor *tensor) {
   return sum;
 }
 
-void scale_tensor(Tensor *tensor, WEI_TYPE scalar) {
+Tensor *scale_tensor(Arena *arena, Tensor *tensor, WEI_TYPE scalar){
+
+  Tensor *out = create_tensor(arena, tensor->shape, tensor->num_dim, 0.0f);
+  if (!out)
+    return NULL;
+
   for (uint32 i = 0; i < tensor->numel; i++) {
-    tensor->data[i] *= scalar;
+    out->data[i] = scalar * tensor->data[i];
   }
+
+  out->grad_fn = (Node *)arena_alloc(arena, sizeof(Node));
+  out->grad_fn->ops = SCALE;
+  out->grad_fn->num_inputs = 1;
+  out->grad_fn->inputs[0] = tensor;
+  out->grad_fn->output = out;
+  out->grad_fn->visited = 0;
+  out->grad_fn->scalar = scalar;
+  return out;
 }
 
 Tensor *copy_tensor(Arena *arena, const Tensor *tensor) {

@@ -30,7 +30,8 @@ enum OPS{
     EMBEDDING,
     LAYER_NORM,
 
-    SPLIT
+    SPLIT,
+    SCALE
 };
 
 struct Node{
@@ -41,6 +42,7 @@ struct Node{
     uint32 visited;
     WEI_TYPE epsilon; // LAYER_NORM
     uint32 offset; // SPLIT fn
+    WEI_TYPE scalar; // SCALE fn
 };
 
 Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim, WEI_TYPE wei_init);
@@ -51,6 +53,6 @@ Tensor *add_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2);
 Tensor *sub_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2);
 Tensor *mul_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2);
 WEI_TYPE sum_tensor(Tensor *tensor);
-void scale_tensor(Tensor *tensor, WEI_TYPE scalar);
+Tensor *scale_tensor(Arena *arena, Tensor *tensor, WEI_TYPE scalar);
 Tensor *copy_tensor(Arena *arena, const Tensor *tensor);
 Tensor *reshape_tensor(Arena *arena, Tensor *tensor, uint32 *dshape, uint32 dnum_dim);
