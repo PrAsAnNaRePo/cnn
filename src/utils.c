@@ -52,3 +52,37 @@ Tensor *split_tensor(Arena *arena, Tensor *src, uint32 off, uint32 width){
 
   return dst;
 }
+
+Tensor *attention_mask_tensor(Arena *arena, Tensor *tensor){
+  // expects input to be the shape of [B, h, s, s] 
+  if (!tensor) return NULL;
+
+  Tensor *mask = create_tensor(arena, tensor->shape, tensor->num_dim, -1e9f);
+  if (!mask) return NULL;
+  
+  uint32 bz = tensor->shape[0];
+  uint32 H = tensor->shape[1];
+  uint32 S = tensor->shape[2];
+
+  for (uint32 b = 0; b < bz; b++){
+    uint32 s_batch = b * H * S * S;
+    for (uint32 h = 0; h < H; h++){
+      uint32 h_row = h * S * S;
+      for (uint32 i = 0; i < S; i++){
+        for (uint32 j = 0; j < S; j++){
+          if (j <= i) mask->data[s_batch + h_row + i * S + j] = tensor->data[s_batch + h_row + i * S + j];
+        }
+      }
+    } 
+  }
+
+  mask->grad_fn = (Node *)arena_alloc(arena, sizeof(Node));
+  mask->grad_fn->ops = ATTN_MASK;
+  mask->grad_fn->num_inputs = 1;
+  mask->grad_fn->inputs[0] = tensor;
+  mask->grad_fn->output = mask;
+  mask->grad_fn->visited = 0;
+  
+  return mask;
+}
+

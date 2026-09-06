@@ -32,7 +32,8 @@ enum OPS{
 
     SPLIT,
     SCALE,
-    TRANSPOSE
+    TRANSPOSE,
+    ATTN_MASK
 };
 
 struct Node{

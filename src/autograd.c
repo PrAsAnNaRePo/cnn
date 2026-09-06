@@ -311,6 +311,26 @@ void backward(Tensor *t){
         }
         break;
       }
+      case ATTN_MASK: {
+        Tensor *input = curr->grad_fn->inputs[0];
+
+        uint32 bz = input->shape[0];
+        uint32 H = input->shape[1];
+        uint32 S = input->shape[2];
+
+        for (uint32 b = 0; b < bz; b++){
+          uint32 s_batch = b * H * S * S;
+          for (uint32 h = 0; h < H; h++){
+            uint32 h_row = h * S * S;
+            for (uint32 i = 0; i < S; i++){
+              for (uint32 j = 0; j < S; j++){
+                if (j <= i) input->grad[s_batch + h_row + i * S + j] += curr->grad[s_batch + h_row + i * S + j]; // all the -inf entries would remain zero
+              }
+            }
+          }
+        }
+        break;
+      }
     }
   }
   for (int32 i = (int32)topo_size - 1; i >= 0; i--){
