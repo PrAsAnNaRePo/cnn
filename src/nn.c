@@ -4,6 +4,8 @@
 #include "types.h"
 #include <math.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 #include "utils.c"
 
 typedef struct LinearLayer {
@@ -26,11 +28,22 @@ typedef struct LayerNormLayer {
   WEI_TYPE epsilon;
 } LayerNormLayer;
 
+typedef struct MHALayer {
+  uint32 num_heads;
+  uint32 d_model;
+
+  LinearLayer* qkv;
+  LinearLayer* fc;
+  LayerNormLayer* ln;
+} MHALayer;
+
 LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias, WEI_TYPE wei_init);
 EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size);
 Tensor *EmbeddingCall(Arena *arena, Tensor *input, EmbeddingLayer* layer);
 LayerNormLayer *LayerNorm(Arena *arena, uint32 d_model, WEI_TYPE epsilon);
 Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer);
+MHALayer *MHANet(Arena *arena, uint32 num_heads, uint32 d_model, WEI_TYPE wei_init, WEI_TYPE epsilon);
+Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer);
 
 Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Tensor *input);
 //activation fns
@@ -50,7 +63,8 @@ LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias, WEI_
   uint32 bias_shape[] = {1, out_ch};
   uint32 n_dim = 2;
   layer->bias = bias ? create_tensor(arena, bias_shape, n_dim, 0.0) : NULL;
-  layer->weight = create_tensor(arena, wei_shape, n_dim, wei_init);
+  layer->weight = create_tensor(arena, wei_shape, n_dim, 0.0f);
+  init_uniform(layer->weight, 1.0f / sqrtf((WEI_TYPE)in_ch));
   return layer;
 }
 
@@ -60,8 +74,8 @@ EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size){
   layer->d_model = d_model;
   
   uint32 wei_shape[2] = {vocab_size, d_model};
-  WEI_TYPE wei_ini = 0.001f;
-  layer->weights = create_tensor(arena, wei_shape, 2, wei_ini);
+  layer->weights = create_tensor(arena, wei_shape, 2, 0.0f);
+  init_uniform(layer->weights, 0.02f);
 
   return layer;
 };
@@ -150,6 +164,77 @@ Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer){
   return output;
 }
 
+MHALayer *MHANet(Arena *arena, uint32 num_heads, uint32 d_model, WEI_TYPE wei_init, WEI_TYPE epsilon){
+  if (d_model % num_heads != 0) return NULL;
+  MHALayer *layer = (MHALayer *)arena_alloc(arena, sizeof(MHALayer));
+  layer->num_heads = num_heads;
+  layer->d_model = d_model;
+
+  layer->qkv = NNLayer(arena, d_model, d_model * 3, 0, wei_init);
+  layer->fc = NNLayer(arena, d_model, d_model, 0, wei_init);
+  layer->ln = LayerNorm(arena, d_model, epsilon);
+  return layer;
+}
+
+Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer){
+  // input -> (B, S, D)
+  // QKV_w -> (D, D * 3)
+  // output -> (B, S, D)
+
+  uint32 bz = input->shape[0];
+  uint32 seq_len = input->shape[1];
+  uint32 d_model = input->shape[2];
+  
+  uint32 new_inp_shape[2] = {bz * seq_len, d_model};
+  Tensor *input_reshaped = reshape_tensor(arena, input, new_inp_shape, 2);
+  Tensor *qkv = mul_tensor(arena, input_reshaped, layer->qkv->weight);
+
+  uint32 qkv_shape[3] = {bz, seq_len, d_model * 3};
+  qkv = reshape_tensor(arena, qkv, qkv_shape, 3);
+
+  Tensor *q = split_tensor(arena, qkv, 0, layer->d_model);
+  Tensor *k = split_tensor(arena, qkv, layer->d_model, layer->d_model);
+  Tensor *v = split_tensor(arena, qkv, layer->d_model * 2, layer->d_model);
+
+  // deviding for the head
+  uint32 head_dim = d_model / layer->num_heads; 
+  uint32 new_qkv_shape[4] = {bz, seq_len, layer->num_heads, head_dim};
+  uint32 mid_out_shape[2] = {bz * seq_len, d_model};
+  uint32 out_shape[3] = {bz, seq_len, d_model};
+  
+  uint32 q_shape[4], k_shape[4], v_shape[4];
+  memcpy(q_shape, new_qkv_shape, sizeof(uint32) * 4);
+  memcpy(k_shape, new_qkv_shape, sizeof(uint32) * 4);
+  memcpy(v_shape, new_qkv_shape, sizeof(uint32) * 4);
+
+  Tensor *q_head = reshape_tensor(arena, q, q_shape, 4); // (B, seq_len, num_heads, head_dim)
+  Tensor *q_head_transposed = transpose_tensor(arena, q_head, 1, 2); // (B, num_heads, seq_len, head_dim)
+
+  Tensor *k_head = reshape_tensor(arena, k, k_shape, 4); // (B, seq_len, num_heads, head_dim)
+  Tensor *k_head_transposed = transpose_tensor(arena, transpose_tensor(arena, k_head, 1, 3), 1, 2);
+
+  Tensor *v_head = reshape_tensor(arena, v, v_shape, 4);
+  Tensor *v_head_transposed = transpose_tensor(arena, v_head, 1, 2);
+
+  Tensor *scores = mul_tensor(arena, q_head_transposed, k_head_transposed);
+  print_tensor(scores);
+  Tensor *normalized_scores = scale_tensor(arena, scores, (WEI_TYPE)(1.0f / sqrtf(head_dim)));
+  Tensor *masked_scores = attention_mask_tensor(arena, normalized_scores);
+  print_tensor(masked_scores);
+  Tensor *attention = Softmax(arena, masked_scores);
+  print_tensor(attention);
+  Tensor *weighted = mul_tensor(arena, attention, v_head_transposed);
+  
+  Tensor *weighted_t = transpose_tensor(arena, weighted, 1, 2); // (B, seq_len, num_heads, head_dim)
+  Tensor *weighted_t_reshaped = reshape_tensor(arena, weighted_t, mid_out_shape, 2); // (B, seq_len, d_model)
+  
+  Tensor *out = mul_tensor(arena, weighted_t_reshaped, layer->fc->weight);
+  Tensor *out_reshaped = reshape_tensor(arena, out, out_shape, 3);
+
+  Tensor *out_add = add_tensor(arena, input, out_reshaped);
+  Tensor *out_norm = LayerNormCall(arena, out_add, layer->ln);
+  return out_norm;
+}
 
 Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Tensor *input){
   for (uint32 layer = 0; layer < num_layers; layer++){
