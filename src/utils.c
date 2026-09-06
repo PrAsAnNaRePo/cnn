@@ -2,6 +2,8 @@
 #include "types.h"
 #include "tensor.h"
 
+static uint32 rng_state = 0x9E3779B9;
+
 WEI_TYPE mean(WEI_TYPE *arr, size_t size){
   WEI_TYPE sum = 0;
   for (size_t i = 0; i < size; i++) {
@@ -86,3 +88,15 @@ Tensor *attention_mask_tensor(Arena *arena, Tensor *tensor){
   return mask;
 }
 
+uint32 xorshift32(void){
+  rng_state ^= rng_state << 13;
+  rng_state ^= rng_state >> 17;
+  rng_state ^= rng_state << 5;
+  return rng_state;
+}
+
+void init_uniform(Tensor *tensor, WEI_TYPE scale){
+  for (uint32 i = 0; i < tensor->numel; i++){
+    tensor->data[i] = ((WEI_TYPE)xorshift32() / (WEI_TYPE)UINT32_MAX * 2.0f - 1.0f) * scale; // [-scale, +scale]
+  }
+}
