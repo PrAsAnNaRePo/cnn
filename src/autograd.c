@@ -274,6 +274,43 @@ void backward(Tensor *t){
         }
         break;
       } 
+      case TRANSPOSE: {
+        Tensor *input = curr->grad_fn->inputs[0];
+        uint32 ax1 = curr->grad_fn->axis1;
+        uint32 ax2 = curr->grad_fn->axis2;
+
+        // same multipliers as the forward: input's story vs the transposed output's story
+        uint32 src_multipliers[input->num_dim], dst_multipliers[input->num_dim];
+        for (uint32 i = 0; i < input->num_dim; i++){
+          src_multipliers[i] = 1;
+          dst_multipliers[i] = 1;
+          for (uint32 j = i + 1; j < input->num_dim; j++){
+            src_multipliers[i] *= input->shape[j];
+            dst_multipliers[i] *= curr->shape[j];
+          }
+        }
+
+        // same pairing loop as the forward; the gradient flows the opposite way
+        uint32 coords[input->num_dim];
+        for (uint32 i = 0; i < input->numel; i++){
+          uint32 left = i;
+          for (uint32 j = 0; j < input->num_dim; j++){
+            coords[j] = left / src_multipliers[j];
+            left = left % src_multipliers[j];
+          }
+
+          uint32 tmp = coords[ax1];
+          coords[ax1] = coords[ax2];
+          coords[ax2] = tmp;
+
+          uint32 idx = 0;
+          for (uint32 j = 0; j < input->num_dim; j++){
+            idx += coords[j] * dst_multipliers[j];
+          }
+          input->grad[i] += curr->grad[idx];
+        }
+        break;
+      }
     }
   }
   for (int32 i = (int32)topo_size - 1; i >= 0; i--){

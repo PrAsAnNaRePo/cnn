@@ -49,6 +49,19 @@ void print_tensor(const Tensor *tensor) {
   printf("]\n");
 }
 
+void print_shape(const Tensor *tensor) {
+  if (!tensor) {
+    printf("Tensor: NULL\n");
+    return;
+  } else {
+    printf("Tensor (shape=[");
+    for (uint32 i = 0; i < tensor->num_dim; i++) {
+      printf("%u%s", tensor->shape[i], (i + 1 < tensor->num_dim) ? ", " : "");
+    }
+    printf("], numel=%u)\n", tensor->numel);
+  }
+}
+
 void print_tensor_grad(const Tensor *tensor) {
   if (!tensor || !tensor->grad) {
     printf("Tensor Grad: NULL\n");
@@ -295,3 +308,61 @@ Tensor *reshape_tensor(Arena *arena, Tensor *tensor, uint32 *dshape,
 
   return dst;
 }
+
+Tensor *transpose_tensor(Arena *arena, Tensor *tensor, uint32 ax1, uint32 ax2){
+  
+  if (!tensor) return NULL;
+  if (ax1 == ax2 || ax1 >= tensor->num_dim || ax2 >= tensor->num_dim) return NULL;
+
+  uint32 dshape[tensor->num_dim];
+  for (uint32 i = 0; i < tensor->num_dim; i++){
+    dshape[i] = tensor->shape[i];
+  }
+  dshape[ax1] = tensor->shape[ax2];
+  dshape[ax2] = tensor->shape[ax1];
+
+  Tensor *dst = create_tensor(arena, dshape, tensor->num_dim, 0.0f);
+  if (!dst) return NULL;
+
+  uint32 src_multipliers[tensor->num_dim], dst_multipliers[tensor->num_dim];
+
+  for (uint32 i = 0; i < tensor->num_dim; i++){
+    src_multipliers[i] = 1;
+    dst_multipliers[i] = 1;
+    for (uint32 j = i + 1; j < tensor->num_dim; j++){
+      src_multipliers[i] *= tensor->shape[j];
+      dst_multipliers[i] *= dshape[j];
+    }
+  }
+
+  uint32 coords[tensor->num_dim];
+  for (uint32 i = 0; i < tensor->numel; i++){
+    uint32 left = i;
+    for (uint32 j = 0; j < tensor->num_dim; j++){
+      coords[j] = left / src_multipliers[j];
+      left = left % src_multipliers[j];
+    }
+
+    uint32 tmp = coords[ax1];
+    coords[ax1] = coords[ax2];
+    coords[ax2] = tmp;
+
+    uint32 idx = 0;
+    for (uint32 j = 0; j < tensor->num_dim; j++){
+      idx += coords[j] * dst_multipliers[j];
+    }
+    dst->data[idx] = tensor->data[i];
+  }
+
+  dst->grad_fn = (Node *)arena_alloc(arena, sizeof(Node));
+  dst->grad_fn->ops = TRANSPOSE;
+  dst->grad_fn->num_inputs = 1;
+  dst->grad_fn->inputs[0] = tensor;
+  dst->grad_fn->output = dst;
+  dst->grad_fn->visited = 0;
+  dst->grad_fn->axis1 = ax1;
+  dst->grad_fn->axis2 = ax2;
+
+  return dst;
+}
+

@@ -31,7 +31,8 @@ enum OPS{
     LAYER_NORM,
 
     SPLIT,
-    SCALE
+    SCALE,
+    TRANSPOSE
 };
 
 struct Node{
@@ -43,11 +44,13 @@ struct Node{
     WEI_TYPE epsilon; // LAYER_NORM
     uint32 offset; // SPLIT fn
     WEI_TYPE scalar; // SCALE fn
+    uint32 axis1, axis2; // TRANSPOSE
 };
 
 Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim, WEI_TYPE wei_init);
 void print_tensor(const Tensor *tensor);
 void print_tensor_grad(const Tensor *tensor);
+void print_shape(const Tensor *tensor);
 
 Tensor *add_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2);
 Tensor *sub_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2);
@@ -56,3 +59,4 @@ WEI_TYPE sum_tensor(Tensor *tensor);
 Tensor *scale_tensor(Arena *arena, Tensor *tensor, WEI_TYPE scalar);
 Tensor *copy_tensor(Arena *arena, const Tensor *tensor);
 Tensor *reshape_tensor(Arena *arena, Tensor *tensor, uint32 *dshape, uint32 dnum_dim);
+Tensor *transpose_tensor(Arena *arena, Tensor *tensor, uint32 ax1, uint32 ax2);
