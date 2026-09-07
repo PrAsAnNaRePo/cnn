@@ -56,6 +56,18 @@ typedef struct TransformerLayer {
   MLPLayer **mlp_layers;
 } TransformerLayer;
 
+#define ADAM_MAX_WEIGHTS 128
+#define ADAM_BETA1 0.9f
+#define ADAM_BETA2 0.999f
+#define ADAM_EPS   1e-8f
+
+typedef struct AdamState {
+  Tensor **weights;
+  uint32 num_weights; // how many slots of weights[] are filled
+  uint32 t;           // step counter, ++ on every adam_step
+  WEI_TYPE lr;
+} AdamState;
+
 LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias);
 
 EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size);
@@ -82,6 +94,8 @@ Tensor *Softmax(Arena *arena, Tensor *input);
 Tensor *mse_loss(Arena *arena, Tensor *output, Tensor *target);
 Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target); // sparse categorical cross-entropy
 
+AdamState *get_adam_state(Arena *arena, Tensor *tensor, WEI_TYPE lr);
+
 LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias){
   LinearLayer *layer = (LinearLayer *)arena_alloc(arena, sizeof(LinearLayer));
   layer->in_ch = in_ch;
@@ -90,8 +104,8 @@ LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias){
   uint32 wei_shape[] = {in_ch, out_ch};
   uint32 bias_shape[] = {1, out_ch};
   uint32 n_dim = 2;
-  layer->bias = bias ? create_tensor(arena, bias_shape, n_dim, 0.0) : NULL;
-  layer->weight = create_tensor(arena, wei_shape, n_dim, 0.0f);
+  layer->bias = bias ? create_tensor(arena, bias_shape, n_dim, 0.0, 1) : NULL;
+  layer->weight = create_tensor(arena, wei_shape, n_dim, 0.0f, 1);
   init_uniform(layer->weight, 1.0f / sqrtf((WEI_TYPE)in_ch));
   return layer;
 }
@@ -102,7 +116,7 @@ EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size){
   layer->d_model = d_model;
   
   uint32 wei_shape[2] = {vocab_size, d_model};
-  layer->weights = create_tensor(arena, wei_shape, 2, 0.0f);
+  layer->weights = create_tensor(arena, wei_shape, 2, 0.0f, 1);
   init_uniform(layer->weights, 0.02f);
 
   return layer;
@@ -120,7 +134,7 @@ Tensor *EmbeddingCall(Arena *arena, Tensor *input, EmbeddingLayer* layer){
   output_shape[0] = bsz;
   output_shape[1] = seq_len;
   output_shape[2] = layer->d_model;
-  Tensor *output = create_tensor(arena, output_shape, 3, 0.0);
+  Tensor *output = create_tensor(arena, output_shape, 3, 0.0, 0);
   for (uint32 b = 0; b < input->shape[0]; b++){
     uint32 s_batch = b * seq_len * layer->d_model;
 
@@ -150,14 +164,14 @@ LayerNormLayer *LayerNorm(Arena *arena, uint32 d_model, WEI_TYPE epsilon){
   layer->epsilon = epsilon;
   uint32 gamma_shape[2] = {1, d_model};
   uint32 beta_shape[2] = {1, d_model};
-  layer->gamma = create_tensor(arena, gamma_shape, 2, 1.0);
-  layer->beta = create_tensor(arena, beta_shape, 2, 0.0);
+  layer->gamma = create_tensor(arena, gamma_shape, 2, 1.0, 1);
+  layer->beta = create_tensor(arena, beta_shape, 2, 0.0, 1);
   return layer;
 }
 
 
 Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer){
-  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0);
+  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0, 0);
 
   uint32 B = input->shape[0];
   uint32 S = input->shape[1];
@@ -329,7 +343,7 @@ Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Ten
 }
 
 Tensor *ReLU(Arena *arena, Tensor *input){
-  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0);
+  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0, 0);
   for (uint32 i = 0; i < input->numel; i++){
     output->data[i] = input->data[i] > 0 ? input->data[i] : 0;
   }
@@ -346,7 +360,7 @@ Tensor *ReLU(Arena *arena, Tensor *input){
 Tensor *Sigmoid(Arena *arena, Tensor *input){
   if (!input) return NULL;
 
-  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0f);
+  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0f, 0);
   if (!output) return NULL;
 
   for (uint32 i = 0; i < input->numel; i++){
@@ -365,7 +379,7 @@ Tensor *Sigmoid(Arena *arena, Tensor *input){
 Tensor *Softmax(Arena *arena, Tensor *input){
   if (!input) return NULL;
 
-  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0f);
+  Tensor *output = create_tensor(arena, input->shape, input->num_dim, 0.0f, 0);
   if (!output) return NULL;
 
   size_t total_batch = 1;
@@ -428,7 +442,7 @@ Tensor *mse_loss(Arena *arena, Tensor *output, Tensor *target){
   uint32 *loss_shape = arena_alloc(arena, sizeof(uint32) * 2);
   loss_shape[0] = 1;
   loss_shape[1] = 1;
-  Tensor *loss = create_tensor(arena, loss_shape, 2, total_loss / bz);
+  Tensor *loss = create_tensor(arena, loss_shape, 2, total_loss / bz, 0);
   loss->grad_fn = (Node *)arena_alloc(arena, sizeof(Node));
   loss->grad_fn->ops = MSE_LOSS;
   loss->grad_fn->num_inputs = 2;
@@ -478,7 +492,7 @@ Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target){
   uint32 *loss_shape = arena_alloc(arena, sizeof(uint32) * 2);
   loss_shape[0] = 1;
   loss_shape[1] = 1;
-  Tensor *loss = create_tensor(arena, loss_shape, 2, cumm_loss / (total_batch * output->shape[output->num_dim - 2]));
+  Tensor *loss = create_tensor(arena, loss_shape, 2, cumm_loss / (total_batch * output->shape[output->num_dim - 2]), 0);
   loss->grad_fn = (Node *)arena_alloc(arena, sizeof(Node));
   loss->grad_fn->ops = SOFTMAX_CROSS_ENTROPY;
   loss->grad_fn->num_inputs = 2;
@@ -488,3 +502,46 @@ Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target){
   loss->grad_fn->visited = 0;
   return loss;
 }
+
+void trace_weights(Tensor *t, Tensor **weights, uint32 *weights_size,
+                   Tensor **nodes, uint32 *nodes_size){
+  if (t == NULL) return;
+
+  if (t->grad_fn == NULL){
+    if (t->m != NULL){
+      uint8 dup = 0;
+      for (uint32 i = 0; i < *weights_size; i++){
+        if (weights[i] == t){ dup = 1; break; }
+      }
+      if (!dup) weights[(*weights_size)++] = t;
+    }
+    return;
+  }
+
+  if (t->grad_fn->visited == 0){
+    t->grad_fn->visited = 1;
+    for (uint32 i = 0; i < t->grad_fn->num_inputs; i++){
+      trace_weights(t->grad_fn->inputs[i], weights, weights_size, nodes, nodes_size);
+    }
+    nodes[(*nodes_size)++] = t;
+  }
+}
+
+AdamState *get_adam_state(Arena *arena, Tensor *tensor, WEI_TYPE lr){
+  AdamState *adam_state = (AdamState *)arena_alloc(arena, sizeof(AdamState));
+  adam_state->weights = (Tensor **)arena_alloc(arena, sizeof(Tensor *) * ADAM_MAX_WEIGHTS);
+  adam_state->num_weights = 0;
+  adam_state->t = 0;
+  adam_state->lr = lr;
+
+  Tensor *nodes[1024];
+  uint32 nodes_size = 0;
+  trace_weights(tensor, adam_state->weights, &adam_state->num_weights, nodes, &nodes_size);
+
+  for (uint32 i = 0; i < nodes_size; i++){
+    nodes[i]->grad_fn->visited = 0;
+  }
+
+  return adam_state;
+}
+

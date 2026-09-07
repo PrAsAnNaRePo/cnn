@@ -13,6 +13,8 @@ typedef struct Tensor {
 
     uint32 numel;
     Node* grad_fn;
+
+    WEI_TYPE *m, *v; // for adam optimizer
 } Tensor;
 
 enum OPS{
@@ -48,7 +50,7 @@ struct Node{
     uint32 axis1, axis2; // TRANSPOSE
 };
 
-Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim, WEI_TYPE wei_init);
+Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim, WEI_TYPE wei_init, uint8 trainable);
 void print_tensor(const Tensor *tensor);
 void print_tensor_grad(const Tensor *tensor);
 void print_shape(const Tensor *tensor);

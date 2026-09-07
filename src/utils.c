@@ -30,7 +30,7 @@ Tensor *split_tensor(Arena *arena, Tensor *src, uint32 off, uint32 width){
     shape[i] = src->shape[i];
   }
   shape[src->num_dim - 1] = width;
-  Tensor *dst = create_tensor(arena, shape, src->num_dim, 0.0f);
+  Tensor *dst = create_tensor(arena, shape, src->num_dim, 0.0f, 0);
   if (!dst) return NULL;
 
   size_t bz = 1;
@@ -59,7 +59,7 @@ Tensor *attention_mask_tensor(Arena *arena, Tensor *tensor){
   // expects input to be the shape of [B, h, s, s] 
   if (!tensor) return NULL;
 
-  Tensor *mask = create_tensor(arena, tensor->shape, tensor->num_dim, -1e9f);
+  Tensor *mask = create_tensor(arena, tensor->shape, tensor->num_dim, -1e9f, 0);
   if (!mask) return NULL;
   
   uint32 bz = tensor->shape[0];

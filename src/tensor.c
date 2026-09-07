@@ -6,7 +6,7 @@
 #include <string.h>
 
 Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim,
-                      WEI_TYPE wei_init) {
+                      WEI_TYPE wei_init, uint8 trainable) {
   Tensor *tensor = (Tensor *)arena_alloc(arena, sizeof(Tensor));
 
   tensor->shape = (uint32 *)arena_alloc(arena, sizeof(uint32) * num_dim);
@@ -30,6 +30,19 @@ Tensor *create_tensor(Arena *arena, uint32 *shape, uint32 num_dim,
     tensor->grad[i] = 0.0;
   }
   tensor->grad_fn = NULL;
+  
+  if (trainable) {
+    tensor->m = (WEI_TYPE *)arena_alloc(arena, sizeof(WEI_TYPE) * tensor->numel);
+    tensor->v = (WEI_TYPE *)arena_alloc(arena, sizeof(WEI_TYPE) * tensor->numel);
+    for (uint32 i = 0; i < tensor->numel; i++) {
+      tensor->m[i] = 0.0;
+      tensor->v[i] = 0.0;
+    }
+  } else {
+    tensor->m = NULL;
+    tensor->v = NULL;
+  }
+
   return tensor;
 }
 
@@ -87,7 +100,7 @@ Tensor *add_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2) {
       return NULL;
   }
 
-  Tensor *c = create_tensor(arena, tensor1->shape, tensor1->num_dim, 0.0);
+  Tensor *c = create_tensor(arena, tensor1->shape, tensor1->num_dim, 0.0, 0);
 
   for (uint32 i = 0; i < tensor1->numel; i++) {
     c->data[i] = tensor1->data[i] + tensor2->data[i];
@@ -113,7 +126,7 @@ Tensor *sub_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2) {
       return NULL;
   }
 
-  Tensor *c = create_tensor(arena, tensor1->shape, tensor1->num_dim, 0.0);
+  Tensor *c = create_tensor(arena, tensor1->shape, tensor1->num_dim, 0.0, 0);
 
   for (uint32 i = 0; i < tensor1->numel; i++) {
     c->data[i] = tensor1->data[i] - tensor2->data[i];
@@ -197,7 +210,7 @@ Tensor *mul_tensor(Arena *arena, Tensor *tensor1, Tensor *tensor2) {
   }
   shape[ndim - 1] = tensor2->shape[ndim - 1];
 
-  Tensor *c = create_tensor(arena, shape, ndim, 0.0f);
+  Tensor *c = create_tensor(arena, shape, ndim, 0.0f, 0);
   if (!c)
     return NULL;
 
@@ -244,7 +257,7 @@ WEI_TYPE sum_tensor(Tensor *tensor) {
 
 Tensor *scale_tensor(Arena *arena, Tensor *tensor, WEI_TYPE scalar){
 
-  Tensor *out = create_tensor(arena, tensor->shape, tensor->num_dim, 0.0f);
+  Tensor *out = create_tensor(arena, tensor->shape, tensor->num_dim, 0.0f, 0);
   if (!out)
     return NULL;
 
@@ -266,7 +279,7 @@ Tensor *copy_tensor(Arena *arena, const Tensor *tensor) {
   if (!tensor)
     return NULL;
 
-  Tensor *dst = create_tensor(arena, tensor->shape, tensor->num_dim, 0.0f);
+  Tensor *dst = create_tensor(arena, tensor->shape, tensor->num_dim, 0.0f, 0);
   if (!dst)
     return NULL;
 
@@ -321,7 +334,7 @@ Tensor *transpose_tensor(Arena *arena, Tensor *tensor, uint32 ax1, uint32 ax2){
   dshape[ax1] = tensor->shape[ax2];
   dshape[ax2] = tensor->shape[ax1];
 
-  Tensor *dst = create_tensor(arena, dshape, tensor->num_dim, 0.0f);
+  Tensor *dst = create_tensor(arena, dshape, tensor->num_dim, 0.0f, 0);
   if (!dst) return NULL;
 
   uint32 src_multipliers[tensor->num_dim], dst_multipliers[tensor->num_dim];
