@@ -46,6 +46,16 @@ typedef struct MLPLayer {
   LayerNormLayer* ln;
 } MLPLayer;
 
+typedef struct TransformerLayer {
+  uint32 d_model;
+  uint32 num_heads;
+  uint32 hidden_size;
+  uint32 num_layers;
+
+  MHALayer **mha_layers;
+  MLPLayer **mlp_layers;
+} TransformerLayer;
+
 LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias, WEI_TYPE wei_init);
 
 EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size);
@@ -59,6 +69,9 @@ Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer);
 
 MLPLayer *MLPNet(Arena *arena, uint32 d_model, uint32 hidden_size, WEI_TYPE wei_init, WEI_TYPE epsilon);
 Tensor *MLPCall(Arena *arena, Tensor *input, MLPLayer* layer);
+
+TransformerLayer *TransformerNet(Arena *arena, uint32 d_model, uint32 num_heads, uint32 hidden_size, uint32 num_layers);
+Tensor *TransformerCall(Arena *arena, Tensor *input, TransformerLayer* layer);
 
 Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Tensor *input);
 //activation fns
@@ -283,6 +296,31 @@ Tensor *MLPCall(Arena *arena, Tensor *input, MLPLayer* layer){
   Tensor *out = add_tensor(arena, input, x_out_reshaped);
   Tensor *out_norm = LayerNormCall(arena, out, layer->ln);
   return out_norm;
+}
+
+TransformerLayer *TransformerNet(Arena *arena, uint32 d_model, uint32 num_heads, uint32 hidden_size, uint32 num_layers){
+  TransformerLayer *layer = (TransformerLayer *)arena_alloc(arena, sizeof(TransformerLayer));
+  layer->d_model = d_model;
+  layer->num_heads = num_heads;
+  layer->hidden_size = hidden_size;
+  layer->num_layers = num_layers;
+
+  layer->mha_layers = (MHALayer **)arena_alloc(arena, sizeof(MHALayer *) * num_layers);
+  layer->mlp_layers = (MLPLayer **)arena_alloc(arena, sizeof(MLPLayer *) * num_layers);
+
+  for (uint32 i = 0; i < num_layers; i++){
+    layer->mha_layers[i] = MHANet(arena, num_heads, d_model, 0, 1e-5);
+    layer->mlp_layers[i] = MLPNet(arena, d_model, hidden_size, 0, 1e-5);
+  }
+  return layer;
+}
+
+Tensor *TransformerCall(Arena *arena, Tensor *input, TransformerLayer* layer){
+  for (uint32 i = 0; i < layer->num_layers; i++){
+    input = MHACall(arena, input, layer->mha_layers[i]);
+    input = MLPCall(arena, input, layer->mlp_layers[i]);
+  }
+  return input;
 }
 
 Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Tensor *input){
