@@ -37,13 +37,28 @@ typedef struct MHALayer {
   LayerNormLayer* ln;
 } MHALayer;
 
+typedef struct MLPLayer {
+  uint32 d_model;
+  uint32 hidden_size;
+
+  LinearLayer* fc1;
+  LinearLayer* fc2;
+  LayerNormLayer* ln;
+} MLPLayer;
+
 LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias, WEI_TYPE wei_init);
+
 EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size);
 Tensor *EmbeddingCall(Arena *arena, Tensor *input, EmbeddingLayer* layer);
+
 LayerNormLayer *LayerNorm(Arena *arena, uint32 d_model, WEI_TYPE epsilon);
 Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer);
+
 MHALayer *MHANet(Arena *arena, uint32 num_heads, uint32 d_model, WEI_TYPE wei_init, WEI_TYPE epsilon);
 Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer);
+
+MLPLayer *MLPNet(Arena *arena, uint32 d_model, uint32 hidden_size, WEI_TYPE wei_init, WEI_TYPE epsilon);
+Tensor *MLPCall(Arena *arena, Tensor *input, MLPLayer* layer);
 
 Tensor *process_sequence(Arena *arena, LinearLayer **seq, uint32 num_layers, Tensor *input);
 //activation fns
@@ -233,6 +248,40 @@ Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer){
 
   Tensor *out_add = add_tensor(arena, input, out_reshaped);
   Tensor *out_norm = LayerNormCall(arena, out_add, layer->ln);
+  return out_norm;
+}
+
+MLPLayer *MLPNet(Arena *arena, uint32 d_model, uint32 hidden_size, WEI_TYPE wei_init, WEI_TYPE epsilon){
+  
+  MLPLayer *layer = (MLPLayer *)arena_alloc(arena, sizeof(MLPLayer));
+  layer->d_model = d_model;
+  layer->hidden_size = hidden_size;
+  layer->fc1 = NNLayer(arena, d_model, hidden_size, 0, wei_init);
+  layer->fc2 = NNLayer(arena, hidden_size, d_model, 0, wei_init);
+  layer->ln = LayerNorm(arena, d_model, epsilon);
+
+  return layer;
+}
+
+Tensor *MLPCall(Arena *arena, Tensor *input, MLPLayer* layer){
+  if (!input) return NULL;
+  if (input->num_dim != 3) return NULL;
+  
+  uint32 bz = input->shape[0];
+  uint32 seq_len = input->shape[1];
+  uint32 d_model = input->shape[2];
+
+  uint32 new_shape[2] = {bz * seq_len, d_model};
+  Tensor *input_reshaped = reshape_tensor(arena, input, new_shape, 2);
+
+  Tensor *x = mul_tensor(arena, input_reshaped, layer->fc1->weight);
+  Tensor *x_relu = ReLU(arena, x);
+  Tensor *x_out = mul_tensor(arena, x_relu, layer->fc2->weight);
+
+  uint32 out_shape[3] = {bz, seq_len, d_model};
+  Tensor *x_out_reshaped = reshape_tensor(arena, x_out, out_shape, 3);
+  Tensor *out = add_tensor(arena, input, x_out_reshaped);
+  Tensor *out_norm = LayerNormCall(arena, out, layer->ln);
   return out_norm;
 }
 
