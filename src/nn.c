@@ -245,12 +245,9 @@ Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer){
   Tensor *v_head_transposed = transpose_tensor(arena, v_head, 1, 2);
 
   Tensor *scores = mul_tensor(arena, q_head_transposed, k_head_transposed);
-  print_tensor(scores);
   Tensor *normalized_scores = scale_tensor(arena, scores, (WEI_TYPE)(1.0f / sqrtf(head_dim)));
   Tensor *masked_scores = attention_mask_tensor(arena, normalized_scores);
-  print_tensor(masked_scores);
   Tensor *attention = Softmax(arena, masked_scores);
-  print_tensor(attention);
   Tensor *weighted = mul_tensor(arena, attention, v_head_transposed);
   
   Tensor *weighted_t = transpose_tensor(arena, weighted, 1, 2); // (B, seq_len, num_heads, head_dim)
@@ -443,12 +440,12 @@ Tensor *mse_loss(Arena *arena, Tensor *output, Tensor *target){
 }
 
 Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target){
-  // output :- (B, D*, C)
+  // output :- (B, D*, C) -> logits; left unmodified
   // target :- (B, 1) -> should contains class index
 
   if (!output || !target) return NULL;
   if (target->num_dim != 2 || target->shape[target->num_dim-1] != 1) return NULL;
-  
+
   size_t total_batch = 1;
   for (uint32 i = 0; i < output->num_dim; i++) {
     if (i < output->num_dim - 2) {
@@ -456,29 +453,25 @@ Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target){
     }
   }
 
+  size_t R = output->shape[output->num_dim - 2];
+  size_t C = output->shape[output->num_dim - 1];
+
   WEI_TYPE cumm_loss = 0.0f;
 
   for (size_t b = 0; b < total_batch; b++) {
-    for (size_t row = 0; row < output->shape[output->num_dim - 2]; row++) {
-      WEI_TYPE *col_vals = (WEI_TYPE *) arena_alloc(arena, sizeof(WEI_TYPE) * output->shape[output->num_dim - 1]);
-      for (size_t col = 0; col < output->shape[output->num_dim - 1]; col++) {
-        col_vals[col] = output->data[b * output->shape[output->num_dim - 2] * output->shape[output->num_dim - 1] + row * output->shape[output->num_dim - 1] + col];
+    for (size_t row = 0; row < R; row++) {
+      WEI_TYPE *row_vals = &output->data[(b * R + row) * C];
+      WEI_TYPE z_true = row_vals[(size_t)target->data[b * R + row]];
+      WEI_TYPE max = row_vals[0];
+      for (size_t col = 1; col < C; col++) {
+        max = row_vals[col] > max ? row_vals[col] : max;
       }
-      WEI_TYPE z_true = col_vals[(uint32)target->data[b * output->shape[output->num_dim - 2] + row]];
-      WEI_TYPE max = col_vals[0];
-      for (size_t col = 1; col < output->shape[output->num_dim - 1]; col++) {
-        max = col_vals[col] > max ? col_vals[col] : max;
-      }
-      WEI_TYPE sum = 0;
-      for (size_t col = 0; col < output->shape[output->num_dim - 1]; col++) {
-        col_vals[col] = expf(col_vals[col] - max);
-        sum += col_vals[col];
+      WEI_TYPE sum = 0.0f;
+      for (size_t col = 0; col < C; col++) {
+        sum += expf(row_vals[col] - max);
       }
 
       cumm_loss += max + logf(sum) - z_true;
-      for (size_t col = 0; col < output->shape[output->num_dim - 1]; col++) {
-        output->data[b * output->shape[output->num_dim - 2] * output->shape[output->num_dim - 1] + row * output->shape[output->num_dim - 1] + col] = col_vals[col] / sum;
-      }
     }
   }
 
@@ -488,7 +481,7 @@ Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target){
   Tensor *loss = create_tensor(arena, loss_shape, 2, cumm_loss / (total_batch * output->shape[output->num_dim - 2]));
   loss->grad_fn = (Node *)arena_alloc(arena, sizeof(Node));
   loss->grad_fn->ops = SOFTMAX_CROSS_ENTROPY;
-  loss->grad_fn->num_inputs = 1;
+  loss->grad_fn->num_inputs = 2;
   loss->grad_fn->inputs[0] = output;
   loss->grad_fn->inputs[1] = target;
   loss->grad_fn->output = loss;

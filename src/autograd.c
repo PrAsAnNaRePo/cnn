@@ -144,33 +144,45 @@ void backward(Tensor *t){
         }
 
       case SOFTMAX_CROSS_ENTROPY: {
+        Tensor *logits = curr->grad_fn->inputs[0];
+        Tensor *target = curr->grad_fn->inputs[1];
+
         size_t total_batch = 1;
-        for (uint32 i = 0; i < curr->grad_fn->inputs[0]->num_dim; i++) {
-          if (i < curr->grad_fn->inputs[0]->num_dim - 2) {
-            total_batch *= curr->grad_fn->inputs[0]->shape[i];
+        for (uint32 i = 0; i < logits->num_dim; i++) {
+          if (i < logits->num_dim - 2) {
+            total_batch *= logits->shape[i];
           }
         }
-        size_t R = curr->grad_fn->inputs[0]->shape[curr->grad_fn->inputs[0]->num_dim - 2];
-        size_t C = curr->grad_fn->inputs[0]->shape[curr->grad_fn->inputs[0]->num_dim - 1];
-        
+        size_t R = logits->shape[logits->num_dim - 2];
+        size_t C = logits->shape[logits->num_dim - 1];
+
         size_t N = total_batch * R;
-        
+
         WEI_TYPE incoming_grad = curr->grad[0];
-        
+
         for (size_t b = 0; b < total_batch; b++) {
           size_t s_batch = b * R * C;
           for (size_t row = 0; row < R; row++) {
             size_t s_row = row * C;
-            size_t true_idx = (size_t)curr->grad_fn->inputs[1]->data[s_batch / C + row]; // Adjusted target index lookup
-            
+            size_t true_idx = (size_t)target->data[b * R + row];
+            WEI_TYPE *row_vals = &logits->data[s_batch + s_row];
+
+            // probs are recomputed from the logits; the forward no longer overwrites them
+            WEI_TYPE max = row_vals[0];
+            for (size_t col = 1; col < C; col++) {
+              max = row_vals[col] > max ? row_vals[col] : max;
+            }
+
+            WEI_TYPE sum = 0.0f;
             for (size_t col = 0; col < C; col++) {
-              size_t current_idx = s_batch + s_row + col;
-              
+              sum += expf(row_vals[col] - max);
+            }
+
+            for (size_t col = 0; col < C; col++) {
               WEI_TYPE indicator = (col == true_idx) ? 1.0f : 0.0f;
-              
-              WEI_TYPE prob = curr->grad_fn->inputs[0]->data[current_idx];
-              
-              curr->grad_fn->inputs[0]->grad[current_idx] += (incoming_grad / (WEI_TYPE)N) * (prob - indicator);
+              WEI_TYPE prob = expf(row_vals[col] - max) / sum;
+
+              logits->grad[s_batch + s_row + col] += (incoming_grad / (WEI_TYPE)N) * (prob - indicator);
             }
           }
         }

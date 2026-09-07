@@ -1,4 +1,3 @@
-#include "src/config.h"
 #include "src/nn.c"
 #include "src/tensor.h"
 #include "src/types.h"
@@ -14,7 +13,7 @@
 #define D_MODEL 256
 #define MAX_LEN 1024
 #define NUM_HEADS 8
-#define NUM_LAYERS 2
+#define NUM_LAYERS 8
 
 
 int main(void){
