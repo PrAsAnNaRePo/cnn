@@ -56,7 +56,7 @@ typedef struct TransformerLayer {
   MLPLayer **mlp_layers;
 } TransformerLayer;
 
-LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias, WEI_TYPE wei_init);
+LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias);
 
 EmbeddingLayer *Embedding(Arena *arena, uint32 d_model, uint32 vocab_size);
 Tensor *EmbeddingCall(Arena *arena, Tensor *input, EmbeddingLayer* layer);
@@ -64,10 +64,10 @@ Tensor *EmbeddingCall(Arena *arena, Tensor *input, EmbeddingLayer* layer);
 LayerNormLayer *LayerNorm(Arena *arena, uint32 d_model, WEI_TYPE epsilon);
 Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer);
 
-MHALayer *MHANet(Arena *arena, uint32 num_heads, uint32 d_model, WEI_TYPE wei_init, WEI_TYPE epsilon);
+MHALayer *MHANet(Arena *arena, uint32 num_heads, uint32 d_model, WEI_TYPE epsilon);
 Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer);
 
-MLPLayer *MLPNet(Arena *arena, uint32 d_model, uint32 hidden_size, WEI_TYPE wei_init, WEI_TYPE epsilon);
+MLPLayer *MLPNet(Arena *arena, uint32 d_model, uint32 hidden_size, WEI_TYPE epsilon);
 Tensor *MLPCall(Arena *arena, Tensor *input, MLPLayer* layer);
 
 TransformerLayer *TransformerNet(Arena *arena, uint32 d_model, uint32 num_heads, uint32 hidden_size, uint32 num_layers);
@@ -82,7 +82,7 @@ Tensor *Softmax(Arena *arena, Tensor *input);
 Tensor *mse_loss(Arena *arena, Tensor *output, Tensor *target);
 Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target); // sparse categorical cross-entropy
 
-LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias, WEI_TYPE wei_init){
+LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias){
   LinearLayer *layer = (LinearLayer *)arena_alloc(arena, sizeof(LinearLayer));
   layer->in_ch = in_ch;
   layer->out_ch = out_ch;
@@ -192,14 +192,14 @@ Tensor *LayerNormCall(Arena *arena, Tensor *input, LayerNormLayer* layer){
   return output;
 }
 
-MHALayer *MHANet(Arena *arena, uint32 num_heads, uint32 d_model, WEI_TYPE wei_init, WEI_TYPE epsilon){
+MHALayer *MHANet(Arena *arena, uint32 num_heads, uint32 d_model, WEI_TYPE epsilon){
   if (d_model % num_heads != 0) return NULL;
   MHALayer *layer = (MHALayer *)arena_alloc(arena, sizeof(MHALayer));
   layer->num_heads = num_heads;
   layer->d_model = d_model;
 
-  layer->qkv = NNLayer(arena, d_model, d_model * 3, 0, wei_init);
-  layer->fc = NNLayer(arena, d_model, d_model, 0, wei_init);
+  layer->qkv = NNLayer(arena, d_model, d_model * 3, 0);
+  layer->fc = NNLayer(arena, d_model, d_model, 0);
   layer->ln = LayerNorm(arena, d_model, epsilon);
   return layer;
 }
@@ -261,13 +261,13 @@ Tensor *MHACall(Arena *arena, Tensor *input, MHALayer* layer){
   return out_norm;
 }
 
-MLPLayer *MLPNet(Arena *arena, uint32 d_model, uint32 hidden_size, WEI_TYPE wei_init, WEI_TYPE epsilon){
+MLPLayer *MLPNet(Arena *arena, uint32 d_model, uint32 hidden_size, WEI_TYPE epsilon){
   
   MLPLayer *layer = (MLPLayer *)arena_alloc(arena, sizeof(MLPLayer));
   layer->d_model = d_model;
   layer->hidden_size = hidden_size;
-  layer->fc1 = NNLayer(arena, d_model, hidden_size, 0, wei_init);
-  layer->fc2 = NNLayer(arena, hidden_size, d_model, 0, wei_init);
+  layer->fc1 = NNLayer(arena, d_model, hidden_size, 0);
+  layer->fc2 = NNLayer(arena, hidden_size, d_model, 0);
   layer->ln = LayerNorm(arena, d_model, epsilon);
 
   return layer;
@@ -306,8 +306,8 @@ TransformerLayer *TransformerNet(Arena *arena, uint32 d_model, uint32 num_heads,
   layer->mlp_layers = (MLPLayer **)arena_alloc(arena, sizeof(MLPLayer *) * num_layers);
 
   for (uint32 i = 0; i < num_layers; i++){
-    layer->mha_layers[i] = MHANet(arena, num_heads, d_model, 0, 1e-5);
-    layer->mlp_layers[i] = MLPNet(arena, d_model, hidden_size, 0, 1e-5);
+    layer->mha_layers[i] = MHANet(arena, num_heads, d_model, 1e-5);
+    layer->mlp_layers[i] = MLPNet(arena, d_model, hidden_size, 1e-5);
   }
   return layer;
 }

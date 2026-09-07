@@ -354,13 +354,24 @@ void backward(Tensor *t){
 void zero_grad(Tensor *t){
   if (t==NULL) return;
 
-  if (t->grad_fn != NULL){
-    for (uint32 i = 0; i < t->grad_fn->num_inputs; i++){
-      zero_grad(t->grad_fn->inputs[i]);
-    }
-  }
+  Tensor *topo_list[1024];
+  uint32 topo_size = 0;
+  build_topo(t, topo_list, &topo_size);
 
-  for (uint32 i = 0; i < t->numel; i++){
-    t->grad[i] = 0.0f;
+  for (uint32 i = 0; i < topo_size; i++){
+    Tensor *curr = topo_list[i];
+
+    for (uint32 j = 0; j < curr->numel; j++){
+      curr->grad[j] = 0.0f;
+    }
+
+    for (uint32 j = 0; j < curr->grad_fn->num_inputs; j++){
+      Tensor *inp = curr->grad_fn->inputs[j];
+      for (uint32 k = 0; k < inp->numel; k++){
+        inp->grad[k] = 0.0f;
+      }
+    }
+
+    curr->grad_fn->visited = 0;
   }
 }
