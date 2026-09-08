@@ -41,6 +41,8 @@ int main(void){
 
   AdamState *adam = get_adam_state(&persistent_arena, out, 0.001f);
   printf("adam weights: %u\n", adam->num_weights);
+  adam_step(adam);
+  printf("adam_step ran on all %u weights\n", adam->num_weights);
 
   return 0;
 }

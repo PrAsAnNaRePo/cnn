@@ -95,6 +95,7 @@ Tensor *mse_loss(Arena *arena, Tensor *output, Tensor *target);
 Tensor *cross_entropy(Arena *arena, Tensor *output, Tensor *target); // sparse categorical cross-entropy
 
 AdamState *get_adam_state(Arena *arena, Tensor *tensor, WEI_TYPE lr);
+void adam_step(AdamState *states);
 
 LinearLayer *NNLayer(Arena *arena, uint32 in_ch, uint32 out_ch, uint8 bias){
   LinearLayer *layer = (LinearLayer *)arena_alloc(arena, sizeof(LinearLayer));
@@ -544,4 +545,27 @@ AdamState *get_adam_state(Arena *arena, Tensor *tensor, WEI_TYPE lr){
 
   return adam_state;
 }
+
+
+void adam_step(AdamState *states){
+  if (!states) return;
+
+  states->t++;
+
+  WEI_TYPE bc1 = 1.0f - powf(ADAM_BETA1, (float)states->t);
+  WEI_TYPE bc2 = 1.0f - powf(ADAM_BETA2, (float)states->t);
+
+  for (uint32 i = 0; i < states->num_weights; i++){
+    Tensor *w = states->weights[i];
+    for (uint32 j = 0; j < w->numel; j++){
+      w->m[j] = ADAM_BETA1 * w->m[j] + (1.0f - ADAM_BETA1) * w->grad[j];
+      w->v[j] = ADAM_BETA2 * w->v[j] + (1.0f - ADAM_BETA2) * w->grad[j] * w->grad[j];
+
+      WEI_TYPE m_hat = w->m[j] / bc1;
+      WEI_TYPE v_hat = w->v[j] / bc2;
+      w->data[j] -= states->lr * m_hat / (sqrtf(v_hat) + ADAM_EPS);
+    }
+  }
+}
+
 
