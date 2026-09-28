@@ -1,8 +1,21 @@
 #include "arena.h"
 #include "types.h"
 #include "tensor.h"
+#include <string.h>
 
 static uint32 rng_state = 0x9E3779B9;
+
+typedef struct Entry{
+  char* key;
+  uint32 value;
+  struct Entry *chain;
+} Entry;
+
+typedef struct {
+  Entry **buckets;
+  uint32 size;
+} HashTable;
+
 
 WEI_TYPE mean(WEI_TYPE *arr, size_t size){
   WEI_TYPE sum = 0;
@@ -100,3 +113,36 @@ void init_uniform(Tensor *tensor, WEI_TYPE scale){
     tensor->data[i] = ((WEI_TYPE)xorshift32() / (WEI_TYPE)UINT32_MAX * 2.0f - 1.0f) * scale; // [-scale, +scale]
   }
 }
+
+unsigned long hash(const char *str){
+  unsigned long hash = 5381;
+  int c;
+  while ((c = *str++))
+    hash = ((hash << 5) + hash) + c;
+  return hash;
+}
+
+void insert_entry(Arena *arena, HashTable *hash_table, char *key, uint32 value){
+  uint32 key_hash = hash(key) % hash_table->size;
+  Entry *entry = (Entry *)arena_alloc(arena, sizeof(Entry));
+  entry->key = key;
+  entry->value = value;
+  entry->chain = hash_table->buckets[key_hash];
+  hash_table->buckets[key_hash] = entry;
+}
+
+uint8 search_entry(HashTable *hash_table, char *key, uint32 *value){
+  uint32 key_hash = hash(key) % hash_table->size;
+  Entry *entry = hash_table->buckets[key_hash];
+
+  while (entry) {
+    if (strcmp(key, entry->key) == 0) {
+      *value = entry->value;
+      return 1;
+    }
+    entry = entry->chain;
+  }
+  return 0;
+}
+
+
