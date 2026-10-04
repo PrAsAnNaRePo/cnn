@@ -6,8 +6,8 @@
 static uint32 rng_state = 0x9E3779B9;
 
 typedef struct Entry{
-  char* key;
-  uint32 value;
+  void *key;
+  void *value;
   struct Entry *chain;
 } Entry;
 
@@ -114,30 +114,50 @@ void init_uniform(Tensor *tensor, WEI_TYPE scale){
   }
 }
 
-unsigned long hash(const char *str){
-  unsigned long hash = 5381;
-  int c;
-  while ((c = *str++))
-    hash = ((hash << 5) + hash) + c;
-  return hash;
+HashTable *create_hash_table(Arena *arena, uint32 size){
+  HashTable *hash_table = (HashTable *)arena_alloc(arena, sizeof(HashTable));
+  hash_table->buckets = (Entry **)arena_alloc(arena, sizeof(Entry *) * size);
+  hash_table->size = size;
+  return hash_table;
+} 
+
+unsigned long hash(const void *key, size_t key_size){
+  const unsigned char *p = (const unsigned char *)key;
+  uint32 h = 5381;
+  for (size_t i = 0; i < key_size; i++) {
+      h = ((h << 5) + h) + p[i];
+  }
+  return h;
 }
 
-void insert_entry(Arena *arena, HashTable *hash_table, char *key, uint32 value){
-  uint32 key_hash = hash(key) % hash_table->size;
-  Entry *entry = (Entry *)arena_alloc(arena, sizeof(Entry));
+void insert_entry(Arena *arena, HashTable *hash_table, void *key, size_t key_len, void *value){
+  if (!hash_table || !key) return;
+  uint32 key_hash = hash(key, key_len) % hash_table->size;
+
+  Entry *entry = hash_table->buckets[key_hash];
+  while (entry) {
+    if (memcmp(key, entry->key, key_len) == 0) {
+      entry->value = value;
+      return;
+    }
+    entry = entry->chain;
+  }
+
+  entry = (Entry *)arena_alloc(arena, sizeof(Entry));
   entry->key = key;
   entry->value = value;
   entry->chain = hash_table->buckets[key_hash];
   hash_table->buckets[key_hash] = entry;
 }
 
-uint8 search_entry(HashTable *hash_table, char *key, uint32 *value){
-  uint32 key_hash = hash(key) % hash_table->size;
+uint8 search_entry(HashTable *hash_table, const void *key, size_t key_len, void **out_value){
+  if (!hash_table || !key) return 0;
+  unsigned long key_hash = hash(key, key_len) % hash_table->size;
   Entry *entry = hash_table->buckets[key_hash];
 
   while (entry) {
-    if (strcmp(key, entry->key) == 0) {
-      *value = entry->value;
+    if (memcmp(key, entry->key, key_len) == 0) {
+      if (out_value) *out_value = entry->value;
       return 1;
     }
     entry = entry->chain;
@@ -145,4 +165,30 @@ uint8 search_entry(HashTable *hash_table, char *key, uint32 *value){
   return 0;
 }
 
+void print_hash_table(HashTable *hash_table){
+  if (!hash_table) {
+    printf("{}\n");
+    return;
+  }
+  printf("{");
+  uint8 first = 1;
+  for (uint32 i = 0; i < hash_table->size; i++) {
+    Entry *entry = hash_table->buckets[i];
+    while (entry) {
+      if (!first) {
+        printf(", ");
+      }
+      printf("\"%s\": %u", entry->key ? (char *)entry->key : "", (uint32)(uintptr_t)entry->value);
+      first = 0;
+      entry = entry->chain;
+    }
+  }
+  printf("}\n");
+}
+
+void encode_string(char* str, size_t len, uint32 *out){
+  for (size_t i = 0; i < len; i++){
+    out[i] = (uint32)str[i];
+  }
+}
 
