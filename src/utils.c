@@ -143,8 +143,11 @@ void insert_entry(Arena *arena, HashTable *hash_table, void *key, size_t key_len
     entry = entry->chain;
   }
 
+  void *key_copy = arena_alloc(arena, key_len);
+  memcpy(key_copy, key, key_len);
+
   entry = (Entry *)arena_alloc(arena, sizeof(Entry));
-  entry->key = key;
+  entry->key = key_copy;
   entry->value = value;
   entry->chain = hash_table->buckets[key_hash];
   hash_table->buckets[key_hash] = entry;
